@@ -32,7 +32,7 @@ func renderMessages(messages []chatMessage, width int) string {
 			b.WriteString(toolLabelStyle.Render("도구"))
 			b.WriteString("\n")
 			renderMarkdownLines(&b, msg.content, contentWidth, func(line string) string {
-				return toolStyle.Render(line)
+				return toolPrefix.Render("│ ") + toolStyle.Render(line)
 			})
 			b.WriteString("\n")
 		default:

@@ -4,15 +4,24 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
 func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case spinner.TickMsg:
+		if m.rateLimit == nil || !m.rateLimit.waiting {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
 		m.resize()
+		m.refreshViewport()
 		return m, nil
 	case tea.KeyMsg:
 		if msg.Type == tea.KeyCtrlC {
@@ -20,6 +29,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.approval != nil {
 			return m.handleApprovalKey(msg)
+		}
+		if handled, cmd := m.handleViewportKey(msg); handled {
+			return m, cmd
 		}
 		if isSubmitKey(msg) && !m.streaming {
 			value := strings.TrimSpace(m.input.Value())
@@ -33,6 +45,8 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input.SetValue("")
 			m.input.Blur()
 			m.adjustInputHeight()
+			m.followOutput = true
+			m.refreshViewport()
 			return m, m.startStream(value)
 		}
 
@@ -40,6 +54,13 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.input, cmd = m.input.Update(msg)
 		m.adjustInputHeight()
 		return m, cmd
+	case tea.MouseMsg:
+		if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
+			var cmd tea.Cmd
+			m.viewport, cmd = m.viewport.Update(msg)
+			m.followOutput = m.viewport.AtBottom()
+			return m, cmd
+		}
 	case streamEvent:
 		return m.handleStreamEvent(msg)
 	}
@@ -58,6 +79,8 @@ func (m tuiModel) handleApprovalKey(msg tea.KeyMsg) (tuiModel, tea.Cmd) {
 		m.approval = nil
 		m.approveMax = 0
 		m.input.Focus()
+		m.adjustViewport()
+		m.refreshViewport()
 	case "n", "esc":
 		m.approval.response <- false
 		close(m.approval.response)
@@ -68,6 +91,8 @@ func (m tuiModel) handleApprovalKey(msg tea.KeyMsg) (tuiModel, tea.Cmd) {
 			content: "승인을 취소했습니다. 추가 요청을 입력해주세요.",
 		})
 		m.input.Focus()
+		m.adjustViewport()
+		m.refreshViewport()
 	case "a":
 		if m.approveMax == 3 {
 			m.autoApprove[commandKeyFromApproval(m.approval)] = true
@@ -76,6 +101,8 @@ func (m tuiModel) handleApprovalKey(msg tea.KeyMsg) (tuiModel, tea.Cmd) {
 			m.approval = nil
 			m.approveMax = 0
 			m.input.Focus()
+			m.adjustViewport()
+			m.refreshViewport()
 		}
 	case "left", "up", "shift+tab":
 		if m.approveMax > 0 {
@@ -102,6 +129,8 @@ func (m tuiModel) handleApprovalKey(msg tea.KeyMsg) (tuiModel, tea.Cmd) {
 				})
 			}
 			m.input.Focus()
+			m.adjustViewport()
+			m.refreshViewport()
 		}
 	default:
 		if msg.Type == tea.KeyRunes {
@@ -114,6 +143,8 @@ func (m tuiModel) handleApprovalKey(msg tea.KeyMsg) (tuiModel, tea.Cmd) {
 				content: "승인을 취소했습니다. 추가 요청을 입력해주세요.",
 			})
 			m.input.Focus()
+			m.adjustViewport()
+			m.refreshViewport()
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)
 			m.adjustInputHeight()
@@ -127,6 +158,7 @@ func (m tuiModel) handleStreamEvent(msg streamEvent) (tuiModel, tea.Cmd) {
 	if msg.done {
 		m.streaming = false
 		m.streamIndex = -1
+		m.rateLimit = nil
 		if m.approval == nil {
 			m.input.Focus()
 		}
@@ -135,12 +167,14 @@ func (m tuiModel) handleStreamEvent(msg streamEvent) (tuiModel, tea.Cmd) {
 				role:    "system",
 				content: fmt.Sprintf("오류: %v", msg.err),
 			})
+			m.refreshViewport()
 		}
 		return m, nil
 	}
 	if msg.sys != nil {
 		m.messages = append(m.messages, *msg.sys)
 		m.streamIndex = -1
+		m.refreshViewport()
 	}
 	if msg.approval != nil {
 		if isAutoApproved(m.autoApprove, msg.approval.tool) {
@@ -151,7 +185,15 @@ func (m tuiModel) handleStreamEvent(msg streamEvent) (tuiModel, tea.Cmd) {
 			m.approveIdx = 0
 			m.approveMax = approvalOptionsCount(msg.approval.tool)
 			m.input.Blur()
+			m.adjustViewport()
 		}
+	}
+	if msg.rate != nil {
+		if msg.rate.waiting {
+			m.rateLimit = msg.rate
+			return m, m.spinner.Tick
+		}
+		m.rateLimit = nil
 	}
 	if msg.chunk != "" {
 		if m.streamIndex < 0 || m.streamIndex >= len(m.messages) || m.messages[m.streamIndex].role != "assistant" {
@@ -159,6 +201,7 @@ func (m tuiModel) handleStreamEvent(msg streamEvent) (tuiModel, tea.Cmd) {
 			m.streamIndex = len(m.messages) - 1
 		}
 		m.messages[m.streamIndex].content += msg.chunk
+		m.refreshViewport()
 	}
 	return m, waitForStream(m.streamCh)
 }

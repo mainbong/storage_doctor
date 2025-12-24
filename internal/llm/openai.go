@@ -9,15 +9,17 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/mainbong/storage_doctor/internal/config"
 	"github.com/mainbong/storage_doctor/internal/httpclient"
 )
 
 type OpenAIProvider struct {
-	apiKey string
-	model  string
-	client httpclient.HTTPClient
+	apiKey  string
+	model   string
+	client  httpclient.HTTPClient
+	limiter *RateLimiter
 }
 
 // NewOpenAIProvider creates a new OpenAI provider
@@ -27,10 +29,12 @@ func NewOpenAIProvider(cfg *config.Config) *OpenAIProvider {
 
 // NewOpenAIProviderWithClient creates a new OpenAI provider with a custom HTTPClient (for testing)
 func NewOpenAIProviderWithClient(cfg *config.Config, client httpclient.HTTPClient) *OpenAIProvider {
+	tokensPerMinute, requestsPerMinute := defaultRateLimits("openai")
 	return &OpenAIProvider{
-		apiKey: cfg.OpenAI.APIKey,
-		model:  cfg.OpenAI.Model,
-		client: client,
+		apiKey:  cfg.OpenAI.APIKey,
+		model:   cfg.OpenAI.Model,
+		client:  client,
+		limiter: NewRateLimiter(time.Minute, tokensPerMinute, requestsPerMinute),
 	}
 }
 
@@ -108,6 +112,9 @@ func (p *OpenAIProvider) StreamChatWithTools(ctx context.Context, messages []Mes
 	if p.apiKey == "" {
 		return fmt.Errorf("openai API key not set")
 	}
+	if err := p.limiter.Wait(ctx, EstimateTokens(messages)); err != nil {
+		return fmt.Errorf("rate limit 대기 실패: %w", err)
+	}
 
 	// Convert messages to OpenAI format
 	openaiMessages := make([]openaiMessage, 0, len(messages))
@@ -168,6 +175,7 @@ func (p *OpenAIProvider) StreamChatWithTools(ctx context.Context, messages []Mes
 		return fmt.Errorf("failed to send request: %w", err)
 	}
 	defer resp.Body.Close()
+	updateLimiterFromHeaders(p.limiter, resp.Header, "x-ratelimit-limit-tokens", "x-ratelimit-limit-requests")
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)

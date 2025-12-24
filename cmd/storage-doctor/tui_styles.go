@@ -17,6 +17,7 @@ var (
 	assistantPrefix  = lipgloss.NewStyle().Foreground(lipgloss.Color("239"))
 	systemStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
 	toolStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("81"))
+	toolPrefix       = lipgloss.NewStyle().Foreground(lipgloss.Color("81"))
 	codeBlockStyle   = lipgloss.NewStyle().Background(lipgloss.Color("235")).Foreground(lipgloss.Color("252"))
 	codeFenceStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 	inlineCodeStyle  = lipgloss.NewStyle().Background(lipgloss.Color("235")).Foreground(lipgloss.Color("252"))
@@ -31,4 +32,5 @@ var (
 	approvalHint     = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
 	approvalOption   = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 	approvalActive   = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Bold(true)
+	rateLimitStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
 )

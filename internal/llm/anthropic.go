@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/mainbong/storage_doctor/internal/config"
 	"github.com/mainbong/storage_doctor/internal/httpclient"
@@ -16,9 +17,10 @@ import (
 )
 
 type AnthropicProvider struct {
-	apiKey string
-	model  string
-	client httpclient.HTTPClient
+	apiKey  string
+	model   string
+	client  httpclient.HTTPClient
+	limiter *RateLimiter
 }
 
 // NewAnthropicProvider creates a new Anthropic provider
@@ -28,10 +30,12 @@ func NewAnthropicProvider(cfg *config.Config) *AnthropicProvider {
 
 // NewAnthropicProviderWithClient creates a new Anthropic provider with a custom HTTPClient (for testing)
 func NewAnthropicProviderWithClient(cfg *config.Config, client httpclient.HTTPClient) *AnthropicProvider {
+	tokensPerMinute, requestsPerMinute := defaultRateLimits("anthropic")
 	return &AnthropicProvider{
-		apiKey: cfg.Anthropic.APIKey,
-		model:  cfg.Anthropic.Model,
-		client: client,
+		apiKey:  cfg.Anthropic.APIKey,
+		model:   cfg.Anthropic.Model,
+		client:  client,
+		limiter: NewRateLimiter(time.Minute, tokensPerMinute, requestsPerMinute),
 	}
 }
 
@@ -88,6 +92,9 @@ func (p *AnthropicProvider) StreamChat(ctx context.Context, messages []Message, 
 func (p *AnthropicProvider) StreamChatWithTools(ctx context.Context, messages []Message, tools []Tool, onChunk func(string), onToolCall func(ToolCall)) error {
 	if p.apiKey == "" {
 		return fmt.Errorf("anthropic API key not set")
+	}
+	if err := p.limiter.Wait(ctx, EstimateTokens(messages)); err != nil {
+		return fmt.Errorf("rate limit 대기 실패: %w", err)
 	}
 
 	// Convert messages to Anthropic format
@@ -171,6 +178,7 @@ func (p *AnthropicProvider) StreamChatWithTools(ctx context.Context, messages []
 		return fmt.Errorf("HTTP 요청 실패: %w", err)
 	}
 	defer resp.Body.Close()
+	updateLimiterFromHeaders(p.limiter, resp.Header, "anthropic-ratelimit-limit-tokens", "anthropic-ratelimit-limit-requests")
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)

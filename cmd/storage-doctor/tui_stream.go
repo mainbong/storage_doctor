@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -12,7 +13,10 @@ import (
 func (m *tuiModel) startStream(input string) tea.Cmd {
 	m.streamCh = make(chan streamEvent, 32)
 	go func() {
-		err := agentInstance.StreamTask(context.Background(), input, func(chunk string) {
+		ctx := llm.WithRateLimitReporter(context.Background(), func(wait time.Duration, waiting bool) {
+			m.streamCh <- streamEvent{rate: &rateLimitStatus{waiting: waiting, wait: wait}}
+		})
+		err := agentInstance.StreamTask(ctx, input, func(chunk string) {
 			m.streamCh <- streamEvent{chunk: chunk}
 		}, func(toolCall llm.ToolCall) (string, error) {
 			approved := true

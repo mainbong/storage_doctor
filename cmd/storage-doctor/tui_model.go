@@ -2,8 +2,11 @@ package main
 
 import (
 	"strings"
+	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/mainbong/storage_doctor/internal/llm"
@@ -15,6 +18,7 @@ type streamEvent struct {
 	err      error
 	sys      *chatMessage
 	approval *approvalRequest
+	rate     *rateLimitStatus
 }
 
 type chatMessage struct {
@@ -27,23 +31,32 @@ type approvalRequest struct {
 	response chan bool
 }
 
+type rateLimitStatus struct {
+	waiting bool
+	wait    time.Duration
+}
+
 type tuiModel struct {
-	input       textarea.Model
-	messages    []chatMessage
-	streaming   bool
-	streamIndex int
-	streamCh    chan streamEvent
-	approval    *approvalRequest
-	approveIdx  int
-	approveMax  int
-	autoApprove map[string]bool
-	width       int
-	height      int
+	input        textarea.Model
+	messages     []chatMessage
+	streaming    bool
+	streamIndex  int
+	streamCh     chan streamEvent
+	approval     *approvalRequest
+	approveIdx   int
+	approveMax   int
+	autoApprove  map[string]bool
+	viewport     viewport.Model
+	followOutput bool
+	spinner      spinner.Model
+	rateLimit    *rateLimitStatus
+	width        int
+	height       int
 }
 
 func runTUI() error {
 	model := newTUIModel()
-	program := tea.NewProgram(model)
+	program := tea.NewProgram(model, tea.WithMouseCellMotion())
 	_, err := program.Run()
 	return err
 }
@@ -69,9 +82,12 @@ func newTUIModel() tuiModel {
 	}
 
 	return tuiModel{
-		input:       input,
-		streamIndex: -1,
-		autoApprove: make(map[string]bool),
+		input:        input,
+		streamIndex:  -1,
+		autoApprove:  make(map[string]bool),
+		viewport:     viewport.New(0, 0),
+		followOutput: true,
+		spinner:      newSpinner(),
 	}
 }
 
@@ -82,6 +98,7 @@ func (m tuiModel) Init() tea.Cmd {
 func (m *tuiModel) resize() {
 	m.input.SetWidth(max(10, m.width-4))
 	m.adjustInputHeight()
+	m.adjustViewport()
 }
 
 func (m *tuiModel) adjustInputHeight() {
@@ -91,4 +108,5 @@ func (m *tuiModel) adjustInputHeight() {
 		lines = strings.Count(value, "\n") + 1
 	}
 	m.input.SetHeight(min(maxHeight, max(1, lines)))
+	m.adjustViewport()
 }

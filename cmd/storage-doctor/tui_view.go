@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"math"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -13,22 +15,24 @@ func (m tuiModel) View() string {
 	}
 
 	divider := strings.Repeat("-", m.width)
-	hintText := "? 단축키 안내 (추가 예정) | Enter 전송 | Shift+Enter 줄바꿈"
+	hintText := "? 단축키 안내 (추가 예정) | Enter 전송 | Shift+Enter 줄바꿈 | PgUp/PgDn 스크롤"
 	hint := lipgloss.PlaceHorizontal(m.width, lipgloss.Left, hintStyle.Render(hintText))
-	if m.streaming {
+	if m.rateLimit != nil && m.rateLimit.waiting {
+		waitSeconds := int(math.Ceil(m.rateLimit.wait.Seconds()))
+		status := fmt.Sprintf("%s rate limit 대기 중... (약 %ds)", m.spinner.View(), waitSeconds)
+		hint = lipgloss.PlaceHorizontal(m.width, lipgloss.Left, rateLimitStyle.Render(status))
+	} else if m.streaming {
 		hint = lipgloss.PlaceHorizontal(m.width, lipgloss.Left, hintStyle.Render("응답 생성 중... (Ctrl+C 종료)"))
 	}
 
-	content := renderMessages(m.messages, m.width)
+	content := m.viewport.View()
 	approval := ""
 	if m.approval != nil {
 		approval = renderApprovalPromptWithSelection(m.approval, m.width, m.approveIdx)
 	}
 
 	parts := []string{}
-	if content != "" {
-		parts = append(parts, content)
-	}
+	parts = append(parts, content)
 	if approval != "" {
 		parts = append(parts, approval)
 	}
