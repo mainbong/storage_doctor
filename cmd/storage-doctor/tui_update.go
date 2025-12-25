@@ -38,6 +38,9 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if value == "" {
 				return m, nil
 			}
+			if isExitCommand(value) {
+				return m, tea.Quit
+			}
 			m.messages = append(m.messages, chatMessage{role: "user", content: value})
 			m.messages = append(m.messages, chatMessage{role: "assistant", content: ""})
 			m.streamIndex = len(m.messages) - 1
@@ -209,6 +212,15 @@ func (m tuiModel) handleStreamEvent(msg streamEvent) (tuiModel, tea.Cmd) {
 func isSubmitKey(msg tea.KeyMsg) bool {
 	switch msg.String() {
 	case "enter":
+		return true
+	default:
+		return false
+	}
+}
+
+func isExitCommand(input string) bool {
+	switch strings.ToLower(strings.TrimSpace(input)) {
+	case "exit", "quit", "q":
 		return true
 	default:
 		return false
